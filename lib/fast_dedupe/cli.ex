@@ -92,7 +92,7 @@ defmodule FastDedupe.CLI do
 
   defp run_search(term, opts) do
     run_opts = [
-      db_path: opts[:db_path] || @default_db_path,
+      db_path: opts[:db_path] || default_search_db_path(),
       output: output_format(opts),
       limit: opts[:limit] || 100
     ]
@@ -110,7 +110,7 @@ defmodule FastDedupe.CLI do
 
   defp run_find(paths, opts) do
     run_opts = [
-      db_path: opts[:db_path] || @default_db_path,
+      db_path: opts[:db_path] || default_scan_db_path(paths),
       partial_bytes: opts[:partial_bytes] || @default_partial_bytes,
       output: output_format(opts)
     ]
@@ -392,6 +392,23 @@ defmodule FastDedupe.CLI do
         _ -> paths
       end
     end
+  end
+
+  defp default_scan_db_path([first_path | _rest]) do
+    expanded = Path.expand(first_path)
+
+    base_dir =
+      cond do
+        File.dir?(expanded) -> expanded
+        File.regular?(expanded) -> Path.dirname(expanded)
+        true -> expanded
+      end
+
+    Path.join(base_dir, @default_db_path)
+  end
+
+  defp default_search_db_path do
+    Path.expand(@default_db_path)
   end
 
   defp parse_output_format(value) when is_binary(value) do

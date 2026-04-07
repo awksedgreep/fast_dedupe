@@ -150,6 +150,25 @@ defmodule FastDedupeTest do
     assert output =~ inspect(duplicate_two, binaries: :as_binaries)
   end
 
+  test "cli defaults the database path into the scan root" do
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "fast_dedupe_default_db_path_#{System.unique_integer([:positive])}"
+      )
+
+    File.mkdir_p!(root)
+    on_exit(fn -> File.rm_rf(root) end)
+
+    output =
+      capture_io(fn ->
+        assert catch_exit(FastDedupe.CLI.main([root])) == {:shutdown, 0}
+      end)
+
+    assert output =~ inspect(Path.join(root, "fast_dedupe.sqlite3"), binaries: :as_binaries)
+    assert File.exists?(Path.join(root, "fast_dedupe.sqlite3"))
+  end
+
   test "cli emits json in find mode" do
     root =
       Path.join(System.tmp_dir!(), "fast_dedupe_json_find_#{System.unique_integer([:positive])}")

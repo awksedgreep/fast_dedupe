@@ -133,7 +133,12 @@ For scripting:
 ./fast_dedupe --search invoice --output json
 ```
 
-If no scan path is provided, the CLI defaults to the current working directory (`.`). The default database path is `fast_dedupe.sqlite3` in the current working directory.
+If no scan path is provided, the CLI defaults to the current working directory (`.`).
+
+If you do not pass `--db-path`:
+
+- scan mode stores `fast_dedupe.sqlite3` in the first scan path
+- search mode looks for `fast_dedupe.sqlite3` in the current working directory
 
 Paths are stored in SQLite as raw `BLOB` values, not `TEXT`, so Unicode filenames are preserved cleanly and the storage layer does not assume UTF-8 text semantics.
 
