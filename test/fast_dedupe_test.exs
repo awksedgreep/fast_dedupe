@@ -90,6 +90,36 @@ defmodule FastDedupeTest do
     assert second_result.duplicate_groups == [Enum.sort([duplicate_one, duplicate_two])]
   end
 
+  test "rerunning after changing one file updates only the changed candidate" do
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "fast_dedupe_resume_change_test_#{System.unique_integer([:positive])}"
+      )
+
+    db_path = Path.join(root, "dedupe.sqlite3")
+    left = Path.join(root, "left")
+    right = Path.join(root, "right")
+
+    File.mkdir_p!(left)
+    File.mkdir_p!(right)
+    on_exit(fn -> File.rm_rf(root) end)
+
+    duplicate_one = Path.join(left, "resume-one.txt")
+    duplicate_two = Path.join(right, "resume-two.txt")
+
+    File.write!(duplicate_one, "same")
+    File.write!(duplicate_two, "same")
+
+    assert {:ok, initial_result} = FastDedupe.run(root, db_path: db_path, partial_bytes: 4_096)
+    assert initial_result.duplicate_groups == [Enum.sort([duplicate_one, duplicate_two])]
+
+    File.write!(duplicate_two, "same-but-different")
+
+    assert {:ok, changed_result} = FastDedupe.run(root, db_path: db_path, partial_bytes: 4_096)
+    assert changed_result.duplicate_groups == []
+  end
+
   test "cli prints a duplicate report in find mode" do
     root =
       Path.join(System.tmp_dir!(), "fast_dedupe_cli_test_#{System.unique_integer([:positive])}")

@@ -192,6 +192,7 @@ defmodule FastDedupe.SQLiteWriter do
     FROM files
     GROUP BY size_bytes
     HAVING COUNT(*) > 1
+       AND SUM(CASE WHEN partial_md5 IS NULL THEN 1 ELSE 0 END) > 0
     ORDER BY size_bytes
     """
 
@@ -199,7 +200,7 @@ defmodule FastDedupe.SQLiteWriter do
       with {:ok, rows} <- fetch_rows(state.conn, group_sql, []) do
         groups =
           Enum.map(rows, fn [size] ->
-            {:ok, files} = files_for_size(state.conn, size)
+            {:ok, files} = files_for_size_missing_partial(state.conn, size)
             {size, files}
           end)
 
@@ -216,6 +217,7 @@ defmodule FastDedupe.SQLiteWriter do
     WHERE partial_md5 IS NOT NULL
     GROUP BY size_bytes, partial_md5
     HAVING COUNT(*) > 1
+       AND SUM(CASE WHEN full_md5 IS NULL THEN 1 ELSE 0 END) > 0
     ORDER BY size_bytes, partial_md5
     """
 
@@ -223,7 +225,7 @@ defmodule FastDedupe.SQLiteWriter do
       with {:ok, rows} <- fetch_rows(state.conn, group_sql, []) do
         groups =
           Enum.map(rows, fn [size, partial_md5] ->
-            {:ok, files} = files_for_partial_hash(state.conn, size, partial_md5)
+            {:ok, files} = files_for_partial_hash_missing_full(state.conn, size, partial_md5)
             {size, partial_md5, files}
           end)
 
@@ -414,11 +416,11 @@ defmodule FastDedupe.SQLiteWriter do
       }
   end
 
-  defp files_for_size(conn, size) do
+  defp files_for_size_missing_partial(conn, size) do
     sql = """
     SELECT id, path
     FROM files
-    WHERE size_bytes = ?
+    WHERE size_bytes = ? AND partial_md5 IS NULL
     ORDER BY path
     """
 
@@ -427,11 +429,11 @@ defmodule FastDedupe.SQLiteWriter do
     end
   end
 
-  defp files_for_partial_hash(conn, size, partial_md5) do
+  defp files_for_partial_hash_missing_full(conn, size, partial_md5) do
     sql = """
     SELECT id, path
     FROM files
-    WHERE size_bytes = ? AND partial_md5 = ?
+    WHERE size_bytes = ? AND partial_md5 = ? AND full_md5 IS NULL
     ORDER BY path
     """
 
