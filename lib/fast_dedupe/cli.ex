@@ -34,6 +34,7 @@ defmodule FastDedupe.CLI do
           search: :string,
           limit: :integer,
           output: :string,
+          debug: :boolean,
           dry_run: :boolean,
           delete: :boolean,
           yes: :boolean,
@@ -112,10 +113,11 @@ defmodule FastDedupe.CLI do
     run_opts = [
       db_path: opts[:db_path] || default_scan_db_path(paths),
       partial_bytes: opts[:partial_bytes] || @default_partial_bytes,
-      output: output_format(opts)
+      output: output_format(opts),
+      progress_fun: progress_fun(opts)
     ]
 
-    case FastDedupe.run(paths, run_opts) do
+    case FastDedupe.run(paths, Keyword.take(run_opts, [:db_path, :partial_bytes, :progress_fun])) do
       {:ok, result} ->
         print_report(paths, run_opts, result)
         {:ok, result, run_opts}
@@ -394,6 +396,67 @@ defmodule FastDedupe.CLI do
     end
   end
 
+  defp progress_fun(opts) do
+    if opts[:debug] do
+      fn event -> print_debug_event(event) end
+    else
+      fn _event -> :ok end
+    end
+  end
+
+  defp print_debug_event({:starting, %{paths: paths, db_path: db_path}}) do
+    IO.puts(
+      :stderr,
+      "[debug] starting scan paths=#{Enum.map_join(paths, ",", &Path.expand/1)} db=#{db_path}"
+    )
+  end
+
+  defp print_debug_event({:partial_phase_started, %{groups: groups}}) do
+    IO.puts(:stderr, "[debug] partial hash phase groups=#{groups}")
+  end
+
+  defp print_debug_event(
+         {:partial_group_started, %{index: index, total: total, size: size, files: files}}
+       ) do
+    IO.puts(:stderr, "[debug] partial group #{index}/#{total} size=#{size} files=#{files}")
+  end
+
+  defp print_debug_event({:full_phase_started, %{groups: groups}}) do
+    IO.puts(:stderr, "[debug] full hash phase groups=#{groups}")
+  end
+
+  defp print_debug_event(
+         {:full_group_started,
+          %{index: index, total: total, size: size, partial_hash: partial_hash, files: files}}
+       ) do
+    IO.puts(
+      :stderr,
+      "[debug] full group #{index}/#{total} size=#{size} partial=#{partial_hash} files=#{files}"
+    )
+  end
+
+  defp print_debug_event(
+         {:hash_batch_started,
+          %{
+            kind: kind,
+            group_index: group_index,
+            group_total: group_total,
+            batch_index: batch_index,
+            batch_files: batch_files
+          }}
+       ) do
+    IO.puts(
+      :stderr,
+      "[debug] #{kind} batch group=#{group_index}/#{group_total} batch=#{batch_index} files=#{batch_files}"
+    )
+  end
+
+  defp print_debug_event({:finished, %{scanned_files: scanned_files}}) do
+    IO.puts(:stderr, "[debug] finished scanned_files=#{scanned_files}")
+  end
+
+  defp print_debug_event(_event), do: :ok
+
   defp default_scan_db_path([first_path | _rest]) do
     expanded = Path.expand(first_path)
 
@@ -499,6 +562,7 @@ defmodule FastDedupe.CLI do
       --search TERM           Search the existing database for matching basenames or paths
       --limit N               Maximum search results to return (default: 100)
       --keep POLICY           Keep policy: first, newest, oldest, shortest-path, longest-path
+      --debug                 Print progress information to stderr during long runs
           --output FORMAT         Output format: text or json
           --dry-run               Show what delete mode would remove without deleting
           --delete                Delete confirmed duplicates, keeping the first path in each group

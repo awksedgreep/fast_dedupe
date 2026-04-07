@@ -30,14 +30,18 @@ defmodule FastDedupe do
     partial_bytes = Keyword.get(opts, :partial_bytes, @default_partial_bytes)
     db_path = Keyword.get(opts, :db_path, "fast_dedupe.sqlite3")
     ignore_paths = ignored_paths(db_path)
+    progress_fun = Keyword.get(opts, :progress_fun, fn _event -> :ok end)
+
+    emit_progress(progress_fun, {:starting, %{paths: paths, db_path: db_path}})
 
     with {:ok, writer} <- SQLiteWriter.start_link(db_path),
          {:ok, scanned_files} <- scan(paths, writer, ignore_paths),
-         {:ok, same_size_groups} <- persist_partial_hashes(writer, partial_bytes),
-         {:ok, partial_hash_groups} <- persist_full_hashes(writer),
+         {:ok, same_size_groups} <- persist_partial_hashes(writer, partial_bytes, progress_fun),
+         {:ok, partial_hash_groups} <- persist_full_hashes(writer, progress_fun),
          {:ok, duplicate_groups} <- SQLiteWriter.duplicate_groups(writer),
          {:ok, confirmed_duplicate_groups} <- confirm_duplicate_groups(duplicate_groups) do
       :ok = SQLiteWriter.stop(writer)
+      emit_progress(progress_fun, {:finished, %{scanned_files: scanned_files}})
 
       {:ok,
        %{
@@ -165,10 +169,27 @@ defmodule FastDedupe do
     end
   end
 
-  defp persist_partial_hashes(writer, partial_bytes) do
+  defp persist_partial_hashes(writer, partial_bytes, progress_fun) do
     with {:ok, groups} <- SQLiteWriter.size_collision_groups(writer) do
-      Enum.reduce_while(groups, {:ok, groups}, fn {_size, files}, {:ok, _groups} = acc ->
-        case update_group_hashes(writer, files, partial_bytes, :partial) do
+      emit_progress(progress_fun, {:partial_phase_started, %{groups: length(groups)}})
+
+      Enum.reduce_while(Enum.with_index(groups, 1), {:ok, groups}, fn {{size, files}, index},
+                                                                      {:ok, _groups} = acc ->
+        emit_progress(
+          progress_fun,
+          {:partial_group_started,
+           %{index: index, total: length(groups), size: size, files: length(files)}}
+        )
+
+        case update_group_hashes(
+               writer,
+               files,
+               partial_bytes,
+               :partial,
+               progress_fun,
+               index,
+               length(groups)
+             ) do
           :ok -> {:cont, acc}
           {:error, _reason} = error -> {:halt, error}
         end
@@ -176,11 +197,26 @@ defmodule FastDedupe do
     end
   end
 
-  defp persist_full_hashes(writer) do
+  defp persist_full_hashes(writer, progress_fun) do
     with {:ok, groups} <- SQLiteWriter.partial_collision_groups(writer) do
-      Enum.reduce_while(groups, {:ok, groups}, fn {_size, _partial_hash, files},
-                                                  {:ok, _groups} = acc ->
-        case update_group_hashes(writer, files, :all, :full) do
+      emit_progress(progress_fun, {:full_phase_started, %{groups: length(groups)}})
+
+      Enum.reduce_while(Enum.with_index(groups, 1), {:ok, groups}, fn {{size, partial_hash,
+                                                                        files}, index},
+                                                                      {:ok, _groups} = acc ->
+        emit_progress(
+          progress_fun,
+          {:full_group_started,
+           %{
+             index: index,
+             total: length(groups),
+             size: size,
+             partial_hash: partial_hash,
+             files: length(files)
+           }}
+        )
+
+        case update_group_hashes(writer, files, :all, :full, progress_fun, index, length(groups)) do
           :ok -> {:cont, acc}
           {:error, _reason} = error -> {:halt, error}
         end
@@ -188,10 +224,31 @@ defmodule FastDedupe do
     end
   end
 
-  defp update_group_hashes(writer, files, bytes_to_read, hash_kind) do
+  defp update_group_hashes(
+         writer,
+         files,
+         bytes_to_read,
+         hash_kind,
+         progress_fun,
+         group_index,
+         group_total
+       ) do
     files
     |> Enum.chunk_every(@db_batch_size)
-    |> Enum.reduce_while(:ok, fn chunk, :ok ->
+    |> Enum.with_index(1)
+    |> Enum.reduce_while(:ok, fn {chunk, batch_index}, :ok ->
+      emit_progress(
+        progress_fun,
+        {:hash_batch_started,
+         %{
+           kind: hash_kind,
+           group_index: group_index,
+           group_total: group_total,
+           batch_index: batch_index,
+           batch_files: length(chunk)
+         }}
+      )
+
       with {:ok, rows} <- hash_rows(chunk, bytes_to_read),
            :ok <- persist_hash_batch(writer, rows, hash_kind) do
         {:cont, :ok}
@@ -274,6 +331,10 @@ defmodule FastDedupe do
   defp md5(data) when is_binary(data) do
     :crypto.hash(:md5, data)
     |> Base.encode16(case: :lower)
+  end
+
+  defp emit_progress(progress_fun, event) when is_function(progress_fun, 1) do
+    progress_fun.(event)
   end
 
   defp confirm_duplicate_groups(groups) do
