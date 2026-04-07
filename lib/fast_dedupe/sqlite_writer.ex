@@ -15,8 +15,8 @@ defmodule FastDedupe.SQLiteWriter do
     GenServer.stop(pid, :normal)
   end
 
-  def insert_file(pid, path, size) do
-    GenServer.call(pid, {:insert_file, path, size}, :infinity)
+  def insert_file(pid, path, size, mtime_unix) do
+    GenServer.call(pid, {:insert_file, path, size, mtime_unix}, :infinity)
   end
 
   def insert_files(pid, rows) do
@@ -77,27 +77,57 @@ defmodule FastDedupe.SQLiteWriter do
   end
 
   @impl true
-  def handle_call({:insert_file, path, size}, _from, state) do
+  def handle_call({:insert_file, path, size, mtime_unix}, _from, state) do
     %{path_text: path_text, basename_text: basename_text} = path_search_fields(path)
 
     sql = """
-    INSERT INTO files(path, path_text, basename_text, size_bytes)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO files(path, path_text, basename_text, size_bytes, mtime_unix)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(path) DO UPDATE SET
+      path_text = excluded.path_text,
+      basename_text = excluded.basename_text,
+      size_bytes = excluded.size_bytes,
+      mtime_unix = excluded.mtime_unix,
+      partial_md5 = CASE
+        WHEN files.size_bytes = excluded.size_bytes AND IFNULL(files.mtime_unix, -1) = IFNULL(excluded.mtime_unix, -1)
+        THEN files.partial_md5
+        ELSE NULL
+      END,
+      full_md5 = CASE
+        WHEN files.size_bytes = excluded.size_bytes AND IFNULL(files.mtime_unix, -1) = IFNULL(excluded.mtime_unix, -1)
+        THEN files.full_md5
+        ELSE NULL
+      END
     """
 
-    {:reply, exec(state.conn, sql, [path, path_text, basename_text, size]), state}
+    {:reply, exec(state.conn, sql, [path, path_text, basename_text, size, mtime_unix]), state}
   end
 
   def handle_call({:insert_files, rows}, _from, state) do
     sql = """
-    INSERT INTO files(path, path_text, basename_text, size_bytes)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO files(path, path_text, basename_text, size_bytes, mtime_unix)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(path) DO UPDATE SET
+      path_text = excluded.path_text,
+      basename_text = excluded.basename_text,
+      size_bytes = excluded.size_bytes,
+      mtime_unix = excluded.mtime_unix,
+      partial_md5 = CASE
+        WHEN files.size_bytes = excluded.size_bytes AND IFNULL(files.mtime_unix, -1) = IFNULL(excluded.mtime_unix, -1)
+        THEN files.partial_md5
+        ELSE NULL
+      END,
+      full_md5 = CASE
+        WHEN files.size_bytes = excluded.size_bytes AND IFNULL(files.mtime_unix, -1) = IFNULL(excluded.mtime_unix, -1)
+        THEN files.full_md5
+        ELSE NULL
+      END
     """
 
     params =
-      Enum.map(rows, fn {path, size} ->
+      Enum.map(rows, fn {path, size, mtime_unix} ->
         %{path_text: path_text, basename_text: basename_text} = path_search_fields(path)
-        [path, path_text, basename_text, size]
+        [path, path_text, basename_text, size, mtime_unix]
       end)
 
     {:reply, exec_many(state.conn, sql, params), state}
@@ -262,6 +292,7 @@ defmodule FastDedupe.SQLiteWriter do
       path_text TEXT,
       basename_text TEXT,
       size_bytes INTEGER NOT NULL,
+      mtime_unix INTEGER,
       partial_md5 TEXT,
       full_md5 TEXT
     );
@@ -291,6 +322,13 @@ defmodule FastDedupe.SQLiteWriter do
              columns,
              "basename_text",
              "ALTER TABLE files ADD COLUMN basename_text TEXT"
+           ),
+         :ok <-
+           maybe_add_column(
+             conn,
+             columns,
+             "mtime_unix",
+             "ALTER TABLE files ADD COLUMN mtime_unix INTEGER"
            ),
          :ok <-
            Sqlite3.execute(

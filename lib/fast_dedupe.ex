@@ -155,7 +155,7 @@ defmodule FastDedupe do
   defp stat_rows(files_with_writer) do
     Enum.reduce_while(files_with_writer, {:ok, []}, fn {path, _writer}, {:ok, acc} ->
       case File.stat(path, time: :posix) do
-        {:ok, stat} -> {:cont, {:ok, [{path, stat.size} | acc]}}
+        {:ok, stat} -> {:cont, {:ok, [{path, stat.size, stat.mtime} | acc]}}
         {:error, _reason} = error -> {:halt, error}
       end
     end)
