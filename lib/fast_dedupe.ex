@@ -240,7 +240,16 @@ defmodule FastDedupe do
     case File.open(path, [:read, :binary]) do
       {:ok, io_device} ->
         try do
-          {:ok, io_device |> IO.binread(bytes) |> md5()}
+          case IO.binread(io_device, bytes) do
+            :eof ->
+              {:ok, md5(<<>>)}
+
+            data when is_binary(data) ->
+              {:ok, md5(data)}
+
+            {:error, reason} ->
+              {:error, reason}
+          end
         after
           File.close(io_device)
         end

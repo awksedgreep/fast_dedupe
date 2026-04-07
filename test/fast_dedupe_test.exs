@@ -40,6 +40,28 @@ defmodule FastDedupeTest do
            ]
   end
 
+  test "handles duplicate empty files" do
+    root =
+      Path.join(System.tmp_dir!(), "fast_dedupe_empty_test_#{System.unique_integer([:positive])}")
+
+    db_path = Path.join(root, "dedupe.sqlite3")
+    left = Path.join(root, "left")
+    right = Path.join(root, "right")
+
+    File.mkdir_p!(left)
+    File.mkdir_p!(right)
+    on_exit(fn -> File.rm_rf(root) end)
+
+    empty_one = Path.join(left, "empty-one.txt")
+    empty_two = Path.join(right, "empty-two.txt")
+
+    File.write!(empty_one, "")
+    File.write!(empty_two, "")
+
+    assert {:ok, result} = FastDedupe.run(root, db_path: db_path, partial_bytes: 4_096)
+    assert result.duplicate_groups == [Enum.sort([empty_one, empty_two])]
+  end
+
   test "cli prints a duplicate report in find mode" do
     root =
       Path.join(System.tmp_dir!(), "fast_dedupe_cli_test_#{System.unique_integer([:positive])}")
