@@ -350,7 +350,11 @@ defmodule FastDedupe.CLI do
   end
 
   defp format_path(path) when is_binary(path) do
-    inspect(path, binaries: :as_binaries)
+    if String.valid?(path) and String.printable?(path) do
+      path
+    else
+      inspect(path, binaries: :as_binaries)
+    end
   end
 
   defp path_json(path) when is_binary(path) do

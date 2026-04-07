@@ -146,8 +146,8 @@ defmodule FastDedupeTest do
 
     assert output =~ "FastDedupe report"
     assert output =~ "confirmed duplicate groups: 1"
-    assert output =~ inspect(duplicate_one, binaries: :as_binaries)
-    assert output =~ inspect(duplicate_two, binaries: :as_binaries)
+    assert output =~ duplicate_one
+    assert output =~ duplicate_two
   end
 
   test "cli defaults the database path into the scan root" do
@@ -165,7 +165,7 @@ defmodule FastDedupeTest do
         assert catch_exit(FastDedupe.CLI.main([root])) == {:shutdown, 0}
       end)
 
-    assert output =~ inspect(Path.join(root, "fast_dedupe.sqlite3"), binaries: :as_binaries)
+    assert output =~ Path.join(root, "fast_dedupe.sqlite3")
     assert File.exists?(Path.join(root, "fast_dedupe.sqlite3"))
   end
 
@@ -318,8 +318,8 @@ defmodule FastDedupeTest do
       end)
 
     assert output =~ "would delete 1 files"
-    assert output =~ inspect(keep_path, binaries: :as_binaries)
-    assert output =~ inspect(delete_path, binaries: :as_binaries)
+    assert output =~ keep_path
+    assert output =~ delete_path
     assert File.exists?(keep_path)
     assert File.exists?(delete_path)
   end
@@ -448,8 +448,8 @@ defmodule FastDedupeTest do
       end)
 
     assert output =~ "FastDedupe search"
-    assert output =~ inspect(match_path, binaries: :as_binaries)
-    refute output =~ inspect(other_path, binaries: :as_binaries)
+    assert output =~ match_path
+    refute output =~ other_path
   end
 
   test "cli searches an existing database in json mode" do
